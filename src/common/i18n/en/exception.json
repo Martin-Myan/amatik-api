@@ -1,0 +1,6 @@
+{
+  "HoldersNotAvailable": "Holders count isn't available at the moment",
+  "CoinNotExist": "Coin doesn't exist",
+  "MarketStatNotExist": "Market Stat doesn't exist",
+  "FgiNotExist": "Fgi Indexes don't exist"
+}

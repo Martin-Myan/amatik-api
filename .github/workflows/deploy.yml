@@ -1,0 +1,121 @@
+name: CI-Build-and-Check-Lint-and-TS
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - staging
+      - CI-CD
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI_COMMIT_SHA: ${{ github.sha }}
+  NODE_ENV: development
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
+  DATABASE_USERNAME: ${{ secrets.DATABASE_USERNAME }}
+  DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+  DATABASE_CA: ${{ secrets.DATABASE_CA }}
+  DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+  DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+  DATABASE_TYPE: postgres
+  DATABASE_SYNCHRONIZE: false
+  DATABASE_SSL_ENABLED: true
+  DATABASE_MAX_CONNECTIONS: 100
+  DATABASE_REJECT_UNAUTHORIZED: false
+  WEB3_CHAINBASE_BSCAN_API_KEY: ${{ secrets.WEB3_CHAINBASE_BSCAN_API_KEY }}
+  WEB3_CONTRACT_ADDRESS: ${{ secrets.WEB3_CONTRACT_ADDRESS }}
+  RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
+
+jobs:
+  run-db-migration:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      - name: Cache dependencies
+        id: cache-node-modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-cache-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-node-modules-
+            ${{ runner.os }}-
+      - name: Install dependencies
+        run: npm ci --force
+      - name: Install ts-node dependency
+        run: npm install -g ts-node --force
+      - name: Cache the build directory
+        if: github.event.pull_request.base.ref == 'main'
+        uses: actions/cache@v3
+        with:
+          path: ./build
+          key: ${{ runner.os }}-build
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      - name: Export Dev Variables
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/CI-CD'
+        run: |
+          ./CI/exporter-dev-keys.sh
+          env > ".env"
+      - name: Run DB Migration for dev environment
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/CI-CD'
+        run: npm run migration:run
+
+      - name: Export Staging Variables
+        if: github.ref == 'refs/heads/staging'
+        run: | # TODO: Create ./CI/exporter-stg-keys.sh file
+          ./CI/exporter-stg-keys.sh
+          env > ".env"
+      - name: Run DB Migration for Staging environment
+        if: github.ref == 'refs/heads/staging'
+        run: npm run migration:run
+
+      - name: Export Production Variables
+        if: github.ref == 'refs/heads/main'
+        run: | # TODO: Create ./CI/exporter-prd-keys.sh file
+          ./CI/exporter-prd-keys.sh
+          env > ".env"
+      - name: Run DB Migration for Production environment
+        if: github.ref == 'refs/heads/main'
+        run: npm run migration:run
+
+  deploy-to-digitalocean:
+    needs: run-db-migration
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Trigger Deployment in DigitalOcean for Dev environment
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/CI-CD'
+        run: |
+          ./CI/deploy_to_digitalocean.sh ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN_CICD }} ${{ secrets.DIGITALOCEAN_DEV_APP_ID }}
+
+      - name: Trigger Deployment in DigitalOcean for Staging environment
+        if: github.ref == 'refs/heads/staging'
+        run: | # TODO: Create DIGITALOCEAN_STG_APP_ID secret
+          ./CI/deploy_to_digitalocean.sh ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN_CICD }} ${{ secrets.DIGITALOCEAN_STG_APP_ID }}
+
+      - name: Trigger Deployment in DigitalOcean for Production environment
+        if: github.ref == 'refs/heads/main'
+        run: | # TODO: Create DIGITALOCEAN_PRD_APP_ID secret
+          ./CI/deploy_to_digitalocean.sh ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN_CICD }} ${{ secrets.DIGITALOCEAN_PRD_APP_ID }}

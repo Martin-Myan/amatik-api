@@ -1,0 +1,80 @@
+name: CI-Build-and-Check-Lint-and-TS
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+      - staging
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI_COMMIT_SHA: ${{ github.sha }}
+  NODE_ENV: development
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  DATABASE_HOST: ${{ secrets.DATABASE_HOST }}
+  DATABASE_USERNAME: ${{ secrets.DATABASE_USERNAME }}
+  DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+  DATABASE_CA: ${{ secrets.DATABASE_CA }}
+  DATABASE_NAME: ${{ secrets.DATABASE_NAME }}
+  DATABASE_PORT: ${{ secrets.DATABASE_PORT }}
+  DATABASE_TYPE: postgres
+  DATABASE_SYNCHRONIZE: false
+  DATABASE_SSL_ENABLED: true
+  DATABASE_MAX_CONNECTIONS: 100
+  DATABASE_REJECT_UNAUTHORIZED: false
+  WEB3_CHAINBASE_BSCAN_API_KEY: ${{ secrets.WEB3_CHAINBASE_BSCAN_API_KEY }}
+  WEB3_CONTRACT_ADDRESS: ${{ secrets.WEB3_CONTRACT_ADDRESS }}
+  RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
+
+jobs:
+  build-lint-ts:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      - name: Cache dependencies
+        id: cache-node-modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-cache-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-node-modules-
+            ${{ runner.os }}-
+      - name: Install dependencies
+        run: npm ci --force
+      - name: Install ts-node dependency
+        run: npm install -g ts-node --force
+      - name: Cache the build directory
+        if: github.event.pull_request.base.ref == 'main'
+        uses: actions/cache@v3
+        with:
+          path: ./build
+          key: ${{ runner.os }}-build
+          restore-keys: |
+            ${{ runner.os }}-build-
+      - name: Build React app
+        if: github.event.pull_request.base.ref == 'main'
+        run: npm run build
+      - name: Run Jest tests
+        if: github.event.pull_request.base.ref == 'main'
+        run: npm test
+      - name: Lint the code
+        if: github.event.pull_request.base.ref == 'develop' || github.event.pull_request.base.ref == 'staging' || github.event.pull_request.base.ref == 'main'
+        run: npm run lint
+      - name: Run TypeScript checks
+        if: github.event.pull_request.base.ref == 'develop' || github.event.pull_request.base.ref == 'staging' || github.event.pull_request.base.ref == 'main'
+        run: npm run typescript
